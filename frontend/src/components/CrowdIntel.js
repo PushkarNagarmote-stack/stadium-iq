@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import PropTypes from 'prop-types';
+import { CSRF_HEADERS } from '../api';
 
 const VENUES_LIST = ['MetLife Stadium, NJ', 'AT&T Stadium, TX', 'SoFi Stadium, CA', 'Estadio Azteca, Mexico City', 'BC Place, Vancouver', "Levi's Stadium, CA"];
 const ZONES_MAP = {
@@ -53,7 +54,7 @@ function CrowdIntel({ api }) {
     try {
       const res = await fetch(`${api}/api/crowd-advice`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...CSRF_HEADERS },
         credentials: 'include',
         body: JSON.stringify({ venue, zone, crowd_level: crowdLevel, incident }),
       });

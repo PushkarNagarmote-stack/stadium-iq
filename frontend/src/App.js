@@ -16,8 +16,9 @@ import FoodOrder from './pages/FoodOrder';
 import VenuesExplorer from './pages/VenuesExplorer';
 import VenueDetail from './pages/VenueDetail';
 import NotFound from './pages/NotFound';
+import { API_BASE } from './api';
 
-const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const API = API_BASE;
 
 function AppLayout() {
   return (

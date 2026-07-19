@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import PropTypes from 'prop-types';
 import jsPDF from 'jspdf';
+import { CSRF_HEADERS } from '../api';
 
 const ROLES = ['Security Officer', 'Crowd Marshal', 'Medical Staff', 'Volunteer Coordinator', 'Gate Staff', 'VIP Host', 'Operations Manager', 'Transport Coordinator'];
 const VENUES_LIST = ['MetLife Stadium, NJ', 'AT&T Stadium, TX', 'SoFi Stadium, CA', 'Estadio Azteca, Mexico City', 'BC Place, Vancouver', "Levi's Stadium, CA"];
@@ -23,7 +24,7 @@ function StaffBriefing({ api }) {
     try {
       const res = await fetch(`${api}/api/briefing`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...CSRF_HEADERS },
         credentials: 'include',
         body: JSON.stringify({ role, venue, shift, special_events: specialEvents }),
       });

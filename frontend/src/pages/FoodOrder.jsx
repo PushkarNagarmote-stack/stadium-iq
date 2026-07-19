@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import PropTypes from 'prop-types';
+import { CSRF_HEADERS } from '../api';
 
 const VENUES = [
   'MetLife Stadium, NJ', 'AT&T Stadium, TX', 'SoFi Stadium, CA',
@@ -67,7 +68,7 @@ function FoodOrder({ api }) {
     try {
       const res = await fetch(`${api}/api/food/checkout`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...CSRF_HEADERS },
         body: JSON.stringify({
           cart: cartEntries.map(([id, quantity]) => ({ id, quantity })),
           venue,

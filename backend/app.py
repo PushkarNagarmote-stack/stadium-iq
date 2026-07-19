@@ -9,6 +9,7 @@ schedule data, and food ordering, via the Groq API and TheSportsDB.
 
 import os
 import secrets
+from concurrent.futures import ThreadPoolExecutor
 from functools import wraps
 
 import requests
@@ -66,6 +67,18 @@ SUPPORTED_LANGUAGES = {
 
 MAX_MESSAGE_LEN = 500
 MAX_CONTEXT_LEN = 200
+MAX_ROLE_LEN = 50
+MAX_SHIFT_LEN = 50
+MAX_ZONE_LEN = 100
+MAX_CART_ITEMS = 50
+MIN_ITEM_QUANTITY = 1
+MAX_ITEM_QUANTITY = 20
+MIN_CROWD_LEVEL = 1
+MAX_CROWD_LEVEL = 10
+
+CSRF_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+CSRF_HEADER_NAME = "X-Requested-With"
+CSRF_HEADER_VALUE = "XMLHttpRequest"
 
 STAFF_USERNAME = os.getenv("STAFF_USERNAME", "admin")
 STAFF_PASSWORD_HASH = os.getenv("STAFF_PASSWORD_HASH")
@@ -85,10 +98,21 @@ FOOD_MENU = [
     {"id": "f9", "name": "Soft-Serve Sundae", "category": "Desserts", "price": 7.00, "emoji": "🍨"},
 ]
 
+FOOD_MENU_BY_ID = {item["id"]: item for item in FOOD_MENU}
+
+# Reused across requests instead of opening a new connection per call.
+_sportsdb_session = requests.Session()
+_schedule_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="schedule-fetch")
+
+_groq_client = None
+
 
 def get_groq_client():
-    """Return an initialised Groq client using the API key from the environment."""
-    return Groq(api_key=os.getenv("GROQ_API_KEY"))
+    """Return a cached Groq client, creating it once on first use."""
+    global _groq_client
+    if _groq_client is None:
+        _groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+    return _groq_client
 
 
 def login_required(f):
@@ -109,12 +133,30 @@ def check_limiter():
         limiter.enabled = True
 
 
+@app.before_request
+def check_csrf_header():
+    """Reject state-changing requests that don't carry the custom CSRF header.
+
+    Simple cross-site requests (plain HTML forms, <img>/<script> tags) cannot
+    attach custom headers without triggering a CORS preflight, which our
+    origin allowlist would block. Same-origin JS fetch/XHR calls set this
+    header explicitly, so legitimate traffic is unaffected.
+    """
+    if request.method not in CSRF_SAFE_METHODS:
+        if request.headers.get(CSRF_HEADER_NAME) != CSRF_HEADER_VALUE:
+            return jsonify({"error": "Missing required request header"}), 403
+
+
 @app.after_request
 def set_security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = "default-src 'self'"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    if IS_PRODUCTION:
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
     return response
 
 
@@ -222,12 +264,12 @@ def briefing():
 
     if not role or not venue or not shift:
         return jsonify({"error": "role, venue, and shift are required"}), 400
-    if len(role) > 50:
-        return jsonify({"error": "Role must be 50 characters or less"}), 400
+    if len(role) > MAX_ROLE_LEN:
+        return jsonify({"error": f"Role must be {MAX_ROLE_LEN} characters or less"}), 400
     if len(venue) > MAX_CONTEXT_LEN:
         return jsonify({"error": f"Venue must be {MAX_CONTEXT_LEN} characters or less"}), 400
-    if len(shift) > 50:
-        return jsonify({"error": "Shift must be 50 characters or less"}), 400
+    if len(shift) > MAX_SHIFT_LEN:
+        return jsonify({"error": f"Shift must be {MAX_SHIFT_LEN} characters or less"}), 400
     if len(special_events) > MAX_MESSAGE_LEN:
         return jsonify({"error": f"Special events must be {MAX_MESSAGE_LEN} characters or less"}), 400
 
@@ -278,12 +320,14 @@ def crowd_advice():
     except (ValueError, TypeError):
         return jsonify({"error": "crowd_level must be a valid number"}), 400
 
-    if crowd_level < 1 or crowd_level > 10:
-        return jsonify({"error": "crowd_level must be between 1 and 10"}), 400
+    if crowd_level < MIN_CROWD_LEVEL or crowd_level > MAX_CROWD_LEVEL:
+        return jsonify({
+            "error": f"crowd_level must be between {MIN_CROWD_LEVEL} and {MAX_CROWD_LEVEL}"
+        }), 400
     if len(venue) > MAX_CONTEXT_LEN:
         return jsonify({"error": f"Venue must be {MAX_CONTEXT_LEN} characters or less"}), 400
-    if len(zone) > 100:
-        return jsonify({"error": "Zone must be 100 characters or less"}), 400
+    if len(zone) > MAX_ZONE_LEN:
+        return jsonify({"error": f"Zone must be {MAX_ZONE_LEN} characters or less"}), 400
     if len(incident) > MAX_MESSAGE_LEN:
         return jsonify({"error": f"Incident must be {MAX_MESSAGE_LEN} characters or less"}), 400
 
@@ -325,22 +369,22 @@ Be direct and operational. Under 200 words."""
     })
 
 
+def _fetch_sportsdb(endpoint):
+    return _sportsdb_session.get(
+        f"{SPORTSDB_BASE}/{endpoint}",
+        params={"id": WORLD_CUP_LEAGUE_ID},
+        timeout=5,
+    )
+
+
 @app.route("/api/schedule", methods=["GET"])
 @limiter.limit("30 per minute")
 def schedule():
     try:
-        next_res = requests.get(
-            f"{SPORTSDB_BASE}/eventsnextleague.php",
-            params={"id": WORLD_CUP_LEAGUE_ID},
-            timeout=5,
-        )
-        past_res = requests.get(
-            f"{SPORTSDB_BASE}/eventspastleague.php",
-            params={"id": WORLD_CUP_LEAGUE_ID},
-            timeout=5,
-        )
-        upcoming = (next_res.json() or {}).get("events") or []
-        recent = (past_res.json() or {}).get("events") or []
+        next_future = _schedule_executor.submit(_fetch_sportsdb, "eventsnextleague.php")
+        past_future = _schedule_executor.submit(_fetch_sportsdb, "eventspastleague.php")
+        upcoming = (next_future.result().json() or {}).get("events") or []
+        recent = (past_future.result().json() or {}).get("events") or []
     except (requests.RequestException, ValueError):
         return jsonify({"error": "Could not reach schedule data source"}), 502
 
@@ -379,10 +423,9 @@ def food_checkout():
 
     if not cart or not isinstance(cart, list):
         return jsonify({"error": "Cart is empty"}), 400
-    if len(cart) > 50:
+    if len(cart) > MAX_CART_ITEMS:
         return jsonify({"error": "Cart has too many line items"}), 400
 
-    menu_by_id = {item["id"]: item for item in FOOD_MENU}
     order_items = []
     total = 0.0
 
@@ -390,14 +433,14 @@ def food_checkout():
         if not isinstance(entry, dict):
             continue
         item_id = entry.get("id")
-        menu_item = menu_by_id.get(item_id)
+        menu_item = FOOD_MENU_BY_ID.get(item_id)
         if not menu_item:
             continue
         try:
             qty = int(entry.get("quantity", 1))
         except (ValueError, TypeError):
             qty = 1
-        qty = max(1, min(qty, 20))
+        qty = max(MIN_ITEM_QUANTITY, min(qty, MAX_ITEM_QUANTITY))
         line_total = round(menu_item["price"] * qty, 2)
         total += line_total
         order_items.append({**menu_item, "quantity": qty, "line_total": line_total})

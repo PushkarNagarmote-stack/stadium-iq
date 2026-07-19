@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { API_BASE, CSRF_HEADERS } from '../api';
 
 const AuthContext = createContext(null);
-const API = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const API = API_BASE;
 
 export function AuthProvider({ children }) {
   const [isStaff, setIsStaff] = useState(false);
@@ -28,7 +29,7 @@ export function AuthProvider({ children }) {
   const login = useCallback(async (uname, password) => {
     const res = await fetch(`${API}/api/login`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...CSRF_HEADERS },
       credentials: 'include',
       body: JSON.stringify({ username: uname, password }),
     });
@@ -43,7 +44,11 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(async () => {
     try {
-      await fetch(`${API}/api/logout`, { method: 'POST', credentials: 'include' });
+      await fetch(`${API}/api/logout`, {
+        method: 'POST',
+        headers: { ...CSRF_HEADERS },
+        credentials: 'include',
+      });
     } catch {
       // Ignore network errors on logout — we clear local state regardless.
     }

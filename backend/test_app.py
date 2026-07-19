@@ -65,10 +65,21 @@ class FakeSportsDBResponse:
 
 
 @pytest.fixture
-def client():
+def raw_client():
+    """Test client with no headers injected — for testing the CSRF gate itself."""
     app_module.app.config.update(TESTING=True)
     with app_module.app.test_client() as test_client:
         yield test_client
+
+
+@pytest.fixture
+def client(raw_client):
+    """Default test client. Auto-attaches the CSRF header the app now requires
+    on every state-changing request, so existing tests don't need to set it
+    individually — only TestCsrfProtection exercises the header being absent.
+    """
+    raw_client.environ_base["HTTP_X_REQUESTED_WITH"] = "XMLHttpRequest"
+    return raw_client
 
 
 @pytest.fixture
@@ -110,17 +121,17 @@ def fake_schedule_ok(monkeypatch):
             return FakeSportsDBResponse({"events": [upcoming_event]})
         return FakeSportsDBResponse({"events": [past_event]})
 
-    monkeypatch.setattr(app_module.requests, "get", fake_get)
+    monkeypatch.setattr(app_module._sportsdb_session, "get", fake_get)
 
 
 @pytest.fixture
 def fake_schedule_down(monkeypatch):
-    """Patch requests.get so /api/schedule simulates an unreachable data source."""
+    """Patch the pooled session so /api/schedule simulates an unreachable data source."""
 
     def fake_get(*args, **kwargs):
         raise app_module.requests.RequestException("connection failed")
 
-    monkeypatch.setattr(app_module.requests, "get", fake_get)
+    monkeypatch.setattr(app_module._sportsdb_session, "get", fake_get)
 
 
 def login(client):
@@ -187,6 +198,50 @@ class TestSecurityHeaders:
     def test_referrer_policy_header(self, client):
         resp = client.get("/api/health")
         assert resp.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+
+    def test_content_security_policy_header(self, client):
+        resp = client.get("/api/health")
+        assert resp.headers.get("Content-Security-Policy") == "default-src 'self'"
+
+    def test_permissions_policy_header(self, client):
+        resp = client.get("/api/health")
+        assert "geolocation=()" in resp.headers.get("Permissions-Policy", "")
+
+    def test_hsts_absent_outside_production(self, client):
+        # FLASK_ENV=testing in this suite, so HSTS should not be set.
+        resp = client.get("/api/health")
+        assert "Strict-Transport-Security" not in resp.headers
+
+
+# ---------------------------------------------------------------------------
+# CSRF header gate (required on every state-changing request)
+# ---------------------------------------------------------------------------
+
+class TestCsrfProtection:
+    def test_post_without_csrf_header_rejected(self, raw_client):
+        resp = raw_client.post("/api/login", json={"username": "x", "password": "y"})
+        assert resp.status_code == 403
+
+    def test_post_with_wrong_csrf_header_rejected(self, raw_client):
+        resp = raw_client.post(
+            "/api/login",
+            json={"username": "x", "password": "y"},
+            headers={"X-Requested-With": "something-else"},
+        )
+        assert resp.status_code == 403
+
+    def test_post_with_csrf_header_passes_gate(self, raw_client):
+        # Wrong credentials, but the CSRF gate itself should let it through to auth logic (401, not 403).
+        resp = raw_client.post(
+            "/api/login",
+            json={"username": "x", "password": "y"},
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        assert resp.status_code != 403
+
+    def test_get_requests_do_not_require_csrf_header(self, raw_client):
+        resp = raw_client.get("/api/health")
+        assert resp.status_code == 200
 
 
 # ---------------------------------------------------------------------------

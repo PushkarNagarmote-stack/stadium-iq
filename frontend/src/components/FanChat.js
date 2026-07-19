@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import PropTypes from 'prop-types';
 import { useLocation } from 'react-router-dom';
+import { CSRF_HEADERS } from '../api';
 
 const LANGUAGES = [
   { code: 'en', name: 'English', flag: '🇺🇸' },
@@ -58,7 +59,7 @@ function FanChat({ api }) {
     try {
       const res = await fetch(`${api}/api/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...CSRF_HEADERS },
         body: JSON.stringify({ message: msg, language, venue, history: messages.slice(-6) }),
       });
       const data = await res.json();
