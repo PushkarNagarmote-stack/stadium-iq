@@ -27,15 +27,11 @@ app = Flask(__name__)
 
 IS_PRODUCTION = os.getenv("FLASK_ENV") == "production"
 
-# Session cookie must be readable cross-site in production (Vercel <-> backend host),
-# but SameSite=None requires Secure=True, which only works over HTTPS.
-# Locally, http://localhost:3000 and :5000 are same-site (same registrable domain),
-# so SameSite=Lax + Secure=False works fine for dev.
 app.secret_key = os.getenv("SECRET_KEY")
 if not app.secret_key:
     if IS_PRODUCTION:
         raise RuntimeError("SECRET_KEY environment variable is required in production")
-    app.secret_key = secrets.token_hex(32)  # dev-only fallback; sessions reset on restart
+    app.secret_key = secrets.token_hex(32)
 
 app.config.update(
     SESSION_COOKIE_SAMESITE="None" if IS_PRODUCTION else "Lax",
@@ -107,13 +103,6 @@ def login_required(f):
 
 @app.before_request
 def check_limiter():
-    """
-    Disable rate limiting during automated tests.
-
-    If the Flask app is in TESTING mode (set by pytest fixtures),
-    rate limiting is turned off so test suites can make rapid requests
-    without being throttled. In normal operation it stays enabled.
-    """
     if app.config.get("TESTING", False):
         limiter.enabled = False
     else:
@@ -122,14 +111,6 @@ def check_limiter():
 
 @app.after_request
 def set_security_headers(response):
-    """
-    Attach standard security headers to every response.
-
-    - X-Content-Type-Options: prevents MIME-type sniffing.
-    - X-Frame-Options: blocks clickjacking via iframes.
-    - X-XSS-Protection: enables legacy browser XSS filter.
-    - Referrer-Policy: limits referrer information on outbound requests.
-    """
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
@@ -139,45 +120,22 @@ def set_security_headers(response):
 
 @app.route("/api/health", methods=["GET"])
 def health():
-    """
-    Simple health-check endpoint.
-
-    Returns:
-        200 with {status, message}.
-    """
     return jsonify({"status": "running", "message": "StadiumIQ API is live!"})
 
 
 @app.route("/api/venues", methods=["GET"])
 def get_venues():
-    """
-    Return the list of FIFA World Cup 2026 host venues.
-
-    Returns:
-        200 with {venues: [...]} containing all venue objects from venues_data.py.
-    """
     return jsonify({"venues": VENUES})
 
-
-# ---- Staff authentication ----
 
 @app.route("/api/login", methods=["POST"])
 @limiter.limit("10 per minute")
 def login():
-    """
-    Authenticate a staff member and start a session.
-
-    Expects JSON body: {"username": str, "password": str}.
-
-    Returns:
-        200 with {success, username} and sets a session cookie on success.
-        400 if fields are missing.
-        401 if credentials are invalid.
-        500 if the server has no staff password configured.
-    """
     data = request.json or {}
-    username = data.get("username", "").strip()
+    username = str(data.get("username", "") or "").strip()
     password = data.get("password", "")
+    if not isinstance(password, str):
+        password = ""
 
     if not username or not password:
         return jsonify({"error": "Username and password are required"}), 400
@@ -194,54 +152,28 @@ def login():
 
 @app.route("/api/logout", methods=["POST"])
 def logout():
-    """Clear the current session."""
     session.clear()
     return jsonify({"success": True})
 
 
 @app.route("/api/session", methods=["GET"])
 def get_session():
-    """
-    Report whether the current request has an authenticated staff session.
-
-    Returns:
-        200 with {authenticated: bool, username: str|None}.
-    """
     return jsonify({
         "authenticated": bool(session.get("staff_logged_in")),
         "username": session.get("staff_username"),
     })
 
 
-# ---- Fan assistant ----
-
 @app.route("/api/chat", methods=["POST"])
 @limiter.limit("20 per minute")
 def chat():
-    """
-    Multilingual AI fan assistant for FIFA World Cup 2026 stadiums.
-
-    Expects JSON body: {
-        "message": str,
-        "language": str (en/es/fr/ar/pt),
-        "venue": str (optional),
-        "history": list (optional, last N turns)
-    }.
-
-    Validates message presence and length, language support, and venue
-    length. Builds a language-specific system prompt with venue context
-    and passes recent conversation history to Groq for continuity.
-
-    Returns:
-        200 with {response, language} on success.
-        400 if message is missing/too long, language is unsupported,
-        or venue exceeds the length limit.
-    """
     data = request.json or {}
-    message = data.get("message", "").strip()
+    message = str(data.get("message", "") or "").strip()
     language = data.get("language", "en")
-    venue = data.get("venue", "").strip()
+    venue = str(data.get("venue", "") or "").strip()
     history = data.get("history", [])
+    if not isinstance(history, list):
+        history = []
 
     if not message:
         return jsonify({"error": "Message is required"}), 400
@@ -263,6 +195,8 @@ def chat():
 
     messages = [{"role": "system", "content": system_prompt}]
     for turn in history[-6:]:
+        if not isinstance(turn, dict):
+            continue
         if turn.get("role") in ("user", "assistant") and turn.get("content"):
             messages.append({"role": turn["role"], "content": str(turn["content"])[:500]})
     messages.append({"role": "user", "content": message})
@@ -276,37 +210,15 @@ def chat():
     return jsonify({"response": response.choices[0].message.content.strip(), "language": language})
 
 
-# ---- Staff briefing (protected) ----
-
 @app.route("/api/briefing", methods=["POST"])
 @limiter.limit("10 per minute")
 @login_required
 def briefing():
-    """
-    Generate an AI-powered pre-shift briefing for stadium staff.
-
-    Requires an authenticated staff session.
-
-    Expects JSON body: {
-        "role": str,
-        "venue": str,
-        "shift": str,
-        "special_events": str (optional)
-    }.
-
-    Validates all required fields and length limits before generating
-    a structured, role-specific briefing via Groq.
-
-    Returns:
-        200 with {briefing, role, venue} on success.
-        400 if required fields are missing or exceed length limits.
-        401 if not authenticated.
-    """
     data = request.json or {}
-    role = data.get("role", "").strip()
-    venue = data.get("venue", "").strip()
-    shift = data.get("shift", "").strip()
-    special_events = data.get("special_events", "").strip()
+    role = str(data.get("role", "") or "").strip()
+    venue = str(data.get("venue", "") or "").strip()
+    shift = str(data.get("shift", "") or "").strip()
+    special_events = str(data.get("special_events", "") or "").strip()
 
     if not role or not venue or not shift:
         return jsonify({"error": "role, venue, and shift are required"}), 400
@@ -349,37 +261,14 @@ Keep it under 250 words. Be specific to their role and venue."""
     })
 
 
-# ---- Crowd intelligence (protected) ----
-
 @app.route("/api/crowd-advice", methods=["POST"])
 @limiter.limit("15 per minute")
 @login_required
 def crowd_advice():
-    """
-    Generate AI crowd management recommendations based on zone density.
-
-    Requires an authenticated staff session.
-
-    Expects JSON body: {
-        "venue": str,
-        "zone": str,
-        "crowd_level": int (1-10),
-        "incident": str (optional)
-    }.
-
-    crowd_level 1-3 = low, 4-6 = moderate, 7-8 = high, 9-10 = critical.
-    Validates all inputs and length limits before calling Groq.
-
-    Returns:
-        200 with {advice, venue, zone, crowd_level, density_label} on success.
-        400 if required fields are missing, crowd_level is not a valid
-        integer in range, or fields exceed length limits.
-        401 if not authenticated.
-    """
     data = request.json or {}
-    venue = data.get("venue", "").strip()
-    zone = data.get("zone", "").strip()
-    incident = data.get("incident", "").strip()
+    venue = str(data.get("venue", "") or "").strip()
+    zone = str(data.get("zone", "") or "").strip()
+    incident = str(data.get("incident", "") or "").strip()
 
     if not venue or not zone:
         return jsonify({"error": "venue and zone are required"}), 400
@@ -436,24 +325,9 @@ Be direct and operational. Under 200 words."""
     })
 
 
-# ---- Match schedule (fan-facing) ----
-
 @app.route("/api/schedule", methods=["GET"])
 @limiter.limit("30 per minute")
 def schedule():
-    """
-    Return upcoming and recent FIFA World Cup 2026 fixtures.
-
-    Proxies TheSportsDB's free API (league id 4429) so the frontend
-    never needs a key. Note: TheSportsDB's free tier does not include
-    true real-time in-play scores (that's a premium feature) — this
-    returns scheduled fixtures and completed-match results, refreshed
-    on request.
-
-    Returns:
-        200 with {upcoming: [...], recent: [...]}.
-        502 if TheSportsDB cannot be reached.
-    """
     try:
         next_res = requests.get(
             f"{SPORTSDB_BASE}/eventsnextleague.php",
@@ -491,42 +365,17 @@ def schedule():
     })
 
 
-# ---- Food ordering (fan-facing) ----
-
 @app.route("/api/food/menu", methods=["GET"])
 def food_menu():
-    """
-    Return the static stadium food & beverage menu.
-
-    Returns:
-        200 with {menu: [...]}.
-    """
     return jsonify({"menu": FOOD_MENU})
 
 
 @app.route("/api/food/checkout", methods=["POST"])
 @limiter.limit("10 per minute")
 def food_checkout():
-    """
-    Process a fake checkout for a food order (no real payment).
-
-    Expects JSON body: {
-        "cart": [{"id": str, "quantity": int}, ...],
-        "venue": str (optional)
-    }.
-
-    Recomputes prices server-side from FOOD_MENU (never trusts
-    client-submitted prices), clamps quantities, and returns a
-    demo order confirmation.
-
-    Returns:
-        200 with {success, order_number, items, total, venue, note}.
-        400 if the cart is missing, empty, too large, or has no
-        valid items.
-    """
     data = request.json or {}
     cart = data.get("cart", [])
-    venue = data.get("venue", "").strip()
+    venue = str(data.get("venue", "") or "").strip()
 
     if not cart or not isinstance(cart, list):
         return jsonify({"error": "Cart is empty"}), 400
