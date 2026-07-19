@@ -45,7 +45,11 @@ app.config.update(
 
 CORS(
     app,
-    origins=["https://stadium-iq-seven.vercel.app", "http://localhost:3000"],
+    origins=[
+        "https://stadium-iq-six-lemon.vercel.app",
+        "https://stadium-lvkxtnd2c-pushkar-workspace.vercel.app",
+        "http://localhost:3000",
+    ],
     supports_credentials=True,
 )
 
