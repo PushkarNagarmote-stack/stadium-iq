@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import PropTypes from 'prop-types';
 import jsPDF from 'jspdf';
 
@@ -36,9 +36,10 @@ function StaffBriefing({ api }) {
     setLoading(false);
   }, [role, venue, shift, specialEvents, api]);
 
-  const briefingLines = briefing
-    ? briefing.split('\n').map((l) => l.trim()).filter(Boolean)
-    : [];
+  const briefingLines = useMemo(
+    () => (briefing ? briefing.split('\n').map((l) => l.trim()).filter(Boolean) : []),
+    [briefing]
+  );
 
   const handleSavePdf = useCallback(() => {
     const doc = new jsPDF();
