@@ -13,7 +13,9 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import wraps
 
 import requests
-from flask import Flask, request, jsonify, session
+from typing import Any
+
+from flask import Flask, request, jsonify, session, Response
 from flask_cors import CORS
 from werkzeug.security import check_password_hash
 from venues_data import VENUES
@@ -107,7 +109,7 @@ _schedule_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="sched
 _groq_client = None
 
 
-def get_groq_client():
+def get_groq_client() -> Groq:
     """Return a cached Groq client, creating it once on first use."""
     global _groq_client
     if _groq_client is None:
@@ -126,7 +128,7 @@ def login_required(f):
 
 
 @app.before_request
-def check_limiter():
+def check_limiter() -> None:
     if app.config.get("TESTING", False):
         limiter.enabled = False
     else:
@@ -134,7 +136,7 @@ def check_limiter():
 
 
 @app.before_request
-def check_csrf_header():
+def check_csrf_header() -> tuple[Response, int] | None:
     """Reject state-changing requests that don't carry the custom CSRF header.
 
     Simple cross-site requests (plain HTML forms, <img>/<script> tags) cannot
@@ -148,7 +150,7 @@ def check_csrf_header():
 
 
 @app.after_request
-def set_security_headers(response):
+def set_security_headers(response: Response) -> Response:
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
@@ -161,18 +163,21 @@ def set_security_headers(response):
 
 
 @app.route("/api/health", methods=["GET"])
-def health():
+def health() -> Response:
+    """Lightweight liveness probe."""
     return jsonify({"status": "running", "message": "StadiumIQ API is live!"})
 
 
 @app.route("/api/venues", methods=["GET"])
-def get_venues():
+def get_venues() -> Response:
+    """Return the static list of World Cup venues."""
     return jsonify({"venues": VENUES})
 
 
 @app.route("/api/login", methods=["POST"])
 @limiter.limit("10 per minute")
-def login():
+def login() -> tuple[Response, int] | Response:
+    """Authenticate staff credentials and start a session."""
     data = request.json or {}
     username = str(data.get("username", "") or "").strip()
     password = data.get("password", "")
@@ -193,13 +198,15 @@ def login():
 
 
 @app.route("/api/logout", methods=["POST"])
-def logout():
+def logout() -> Response:
+    """Clear the staff session."""
     session.clear()
     return jsonify({"success": True})
 
 
 @app.route("/api/session", methods=["GET"])
-def get_session():
+def get_session() -> Response:
+    """Report whether the current client has an active staff session."""
     return jsonify({
         "authenticated": bool(session.get("staff_logged_in")),
         "username": session.get("staff_username"),
@@ -208,7 +215,8 @@ def get_session():
 
 @app.route("/api/chat", methods=["POST"])
 @limiter.limit("20 per minute")
-def chat():
+def chat() -> tuple[Response, int] | Response:
+    """Answer a fan question via the Groq LLM in the requested language."""
     data = request.json or {}
     message = str(data.get("message", "") or "").strip()
     language = data.get("language", "en")
@@ -255,7 +263,8 @@ def chat():
 @app.route("/api/briefing", methods=["POST"])
 @limiter.limit("10 per minute")
 @login_required
-def briefing():
+def briefing() -> tuple[Response, int] | Response:
+    """Generate a pre-shift briefing for a staff role/venue/shift via Groq."""
     data = request.json or {}
     role = str(data.get("role", "") or "").strip()
     venue = str(data.get("venue", "") or "").strip()
@@ -306,7 +315,8 @@ Keep it under 250 words. Be specific to their role and venue."""
 @app.route("/api/crowd-advice", methods=["POST"])
 @limiter.limit("15 per minute")
 @login_required
-def crowd_advice():
+def crowd_advice() -> tuple[Response, int] | Response:
+    """Generate crowd-management recommendations for a venue/zone via Groq."""
     data = request.json or {}
     venue = str(data.get("venue", "") or "").strip()
     zone = str(data.get("zone", "") or "").strip()
@@ -369,7 +379,7 @@ Be direct and operational. Under 200 words."""
     })
 
 
-def _fetch_sportsdb(endpoint):
+def _fetch_sportsdb(endpoint: str) -> requests.Response:
     return _sportsdb_session.get(
         f"{SPORTSDB_BASE}/{endpoint}",
         params={"id": WORLD_CUP_LEAGUE_ID},
@@ -379,7 +389,8 @@ def _fetch_sportsdb(endpoint):
 
 @app.route("/api/schedule", methods=["GET"])
 @limiter.limit("30 per minute")
-def schedule():
+def schedule() -> tuple[Response, int] | Response:
+    """Fetch upcoming and recent World Cup fixtures from TheSportsDB."""
     try:
         next_future = _schedule_executor.submit(_fetch_sportsdb, "eventsnextleague.php")
         past_future = _schedule_executor.submit(_fetch_sportsdb, "eventspastleague.php")
@@ -410,13 +421,15 @@ def schedule():
 
 
 @app.route("/api/food/menu", methods=["GET"])
-def food_menu():
+def food_menu() -> Response:
+    """Return the static food & beverage menu."""
     return jsonify({"menu": FOOD_MENU})
 
 
 @app.route("/api/food/checkout", methods=["POST"])
 @limiter.limit("10 per minute")
-def food_checkout():
+def food_checkout() -> tuple[Response, int] | Response:
+    """Validate a cart against server-side prices and return an order confirmation."""
     data = request.json or {}
     cart = data.get("cart", [])
     venue = str(data.get("venue", "") or "").strip()
