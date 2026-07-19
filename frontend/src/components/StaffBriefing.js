@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import PropTypes from 'prop-types';
+import jsPDF from 'jspdf';
 
 const ROLES = ['Security Officer', 'Crowd Marshal', 'Medical Staff', 'Volunteer Coordinator', 'Gate Staff', 'VIP Host', 'Operations Manager', 'Transport Coordinator'];
 const VENUES_LIST = ['MetLife Stadium, NJ', 'AT&T Stadium, TX', 'SoFi Stadium, CA', 'Estadio Azteca, Mexico City', 'BC Place, Vancouver', "Levi's Stadium, CA"];
@@ -38,6 +39,45 @@ function StaffBriefing({ api }) {
   const briefingLines = briefing
     ? briefing.split('\n').map((l) => l.trim()).filter(Boolean)
     : [];
+
+  const handleSavePdf = useCallback(() => {
+    const doc = new jsPDF();
+    const marginX = 15;
+    let y = 20;
+
+    doc.setFontSize(18);
+    doc.text('StadiumIQ Staff Briefing', marginX, y);
+    y += 10;
+
+    doc.setFontSize(11);
+    doc.text(`Role: ${role}`, marginX, y);
+    y += 7;
+    doc.text(`Venue: ${venue}`, marginX, y);
+    y += 7;
+    doc.text(`Shift: ${shift}`, marginX, y);
+    y += 12;
+
+    doc.setFontSize(13);
+    doc.text('Key Directives', marginX, y);
+    y += 8;
+
+    doc.setFontSize(11);
+    const pageWidth = doc.internal.pageSize.getWidth() - marginX * 2;
+    briefingLines.forEach((line) => {
+      const wrapped = doc.splitTextToSize(`• ${line}`, pageWidth);
+      wrapped.forEach((wLine) => {
+        if (y > 280) {
+          doc.addPage();
+          y = 20;
+        }
+        doc.text(wLine, marginX, y);
+        y += 7;
+      });
+    });
+
+    const safeVenue = venue.replace(/[^a-z0-9]/gi, '-');
+    doc.save(`briefing-${safeVenue}.pdf`);
+  }, [role, venue, shift, briefingLines]);
 
   return (
     <main className="flex-grow p-container-margin w-full max-w-4xl mx-auto flex flex-col gap-lg">
@@ -179,13 +219,13 @@ function StaffBriefing({ api }) {
               </div>
 
               <div className="flex justify-end gap-sm mt-auto pt-sm border-t border-white/10 relative z-10">
-                <button className="px-sm py-xs border border-outline rounded-lg text-on-surface font-label-sm text-label-sm flex items-center gap-xs hover:bg-surface-variant transition-colors" type="button">
+                <button
+                  className="px-sm py-xs border border-outline rounded-lg text-on-surface font-label-sm text-label-sm flex items-center gap-xs hover:bg-surface-variant transition-colors"
+                  onClick={handleSavePdf}
+                  type="button"
+                >
                   <span className="material-symbols-outlined text-[18px]">download</span>
                   Save PDF
-                </button>
-                <button className="px-sm py-xs bg-surface-bright rounded-lg text-on-surface font-label-sm text-label-sm flex items-center gap-xs hover:bg-surface-variant transition-colors" type="button">
-                  <span className="material-symbols-outlined text-[18px]">share</span>
-                  Share Team
                 </button>
               </div>
             </>
