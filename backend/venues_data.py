@@ -1,0 +1,81 @@
+"""
+FIFA World Cup 2026 official venue data.
+
+Contains stadium information for host venues across the
+United States, Canada, and Mexico.
+"""
+
+VENUES = [
+    {
+        "id": "metlife",
+        "name": "MetLife Stadium",
+        "city": "East Rutherford, NJ",
+        "country": "USA",
+        "capacity": 82500,
+        "matches": "Opening Ceremony + Final",
+        "zones": ["North", "South", "East", "West", "VIP", "Media"],
+        "gates": ["A", "B", "C", "D", "E", "F"],
+        "transport": ["NJ Transit train", "Bus shuttles", "Rideshare drop-off Zone C"],
+        "accessibility": "Full wheelchair access all zones, sensory rooms at Gate B",
+    },
+    {
+        "id": "att",
+        "name": "AT&T Stadium",
+        "city": "Arlington, TX",
+        "country": "USA",
+        "capacity": 80000,
+        "matches": "Group Stage + Knockout",
+        "zones": ["North", "South", "East", "West", "Club", "Suite"],
+        "gates": ["A", "B", "C", "D"],
+        "transport": ["Bus shuttles from Dallas", "Rideshare Zone D", "Parking Lots 1-8"],
+        "accessibility": "Wheelchair access all levels, assisted listening devices available",
+    },
+    {
+        "id": "sofi",
+        "name": "SoFi Stadium",
+        "city": "Inglewood, CA",
+        "country": "USA",
+        "capacity": 70240,
+        "matches": "Group Stage + Semifinal",
+        "zones": ["100s", "200s", "300s", "Field", "Club"],
+        "gates": ["North", "South", "East", "West"],
+        "transport": ["Metro K Line to Crenshaw", "Bus shuttles", "Rideshare Zone B"],
+        "accessibility": "Full ADA compliance, companion seating all zones",
+    },
+    {
+        "id": "azteca",
+        "name": "Estadio Azteca",
+        "city": "Mexico City",
+        "country": "Mexico",
+        "capacity": 87523,
+        "matches": "Opening Match",
+        "zones": ["Norte", "Sur", "Oriente", "Poniente"],
+        "gates": ["1", "2", "3", "4", "5", "6"],
+        "transport": ["Metro Line 2 to Tasqueña", "Bus RTP", "Taxi Zone Sur"],
+        "accessibility": "Rampas de acceso todas las zonas, sillas de ruedas disponibles",
+    },
+    {
+        "id": "bcplace",
+        "name": "BC Place",
+        "city": "Vancouver, BC",
+        "country": "Canada",
+        "capacity": 54500,
+        "matches": "Group Stage + Quarterfinal",
+        "zones": ["Lower Bowl", "Upper Bowl", "Club", "Suite"],
+        "gates": ["Gate A", "Gate B", "Gate C", "Gate D"],
+        "transport": ["SkyTrain Stadium-Chinatown Station", "Bus 15/17", "Rideshare Zone A"],
+        "accessibility": "Full wheelchair access, sign language interpretation available",
+    },
+    {
+        "id": "levi",
+        "name": "Levi's Stadium",
+        "city": "Santa Clara, CA",
+        "country": "USA",
+        "capacity": 68500,
+        "matches": "Group Stage + Round of 16",
+        "zones": ["North", "South", "East", "West", "Club", "Suite"],
+        "gates": ["A", "B", "C", "D"],
+        "transport": ["VTA Light Rail", "Caltrain shuttle", "Rideshare Zone A"],
+        "accessibility": "Full ADA access, audio description service available",
+    },
+]
